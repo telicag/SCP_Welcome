@@ -1,4 +1,4 @@
-/* Hello SCP Welcome Application
+/* Telic SCP_Welcome Application
 
    This example code is CC0 licensed
 
@@ -15,9 +15,6 @@
 #include "esp_spi_flash.h"
 #include "esp_log.h"
 #include "driver/i2c.h"
-
-
-static const char *TAG = "SCP-Welcome";
 
 /* I2C bus constants */
 #define I2C_MASTER_SDA_IO           21
@@ -126,7 +123,7 @@ void app_main(void)
     printf("Init IOExpander\n");
     initLedGpios(); 
     
-    for (int i = 20; i >= 0; i--) {
+    for (int i = 15; i >= 0; i--) {
         printf("Restarting in %d seconds...\n", i);
         setLED( LED_1_MASK, i%2);
         setLED( LED_2_MASK, !(i%2));
