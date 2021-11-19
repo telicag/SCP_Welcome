@@ -15,6 +15,7 @@ pipeline {
         docker {
             alwaysPull true
             image 'espressif/idf:release-v4.4'
+            args "--entrypoint=\'\' -u0:0"
         }
     }
 
@@ -22,7 +23,9 @@ pipeline {
         stage ('clone standard') {
             steps{
                 sh "env | sort"
-                sh 'sudo -S chmod 777 . | echo telic'
+                sh "chmod 777 ."
+                sh "rm -rf build"
+
                 checkout ([
                         $class: 'GitSCM',
                         branches:  scm.branches,
@@ -44,22 +47,26 @@ pipeline {
                         ],
                         userRemoteConfigs: scm.userRemoteConfigs
                     ])
-                sh 'git status'
                 sh 'git submodule update --init --recursive'
-                sh 'echo git success'
             }
         }
 
         stage ('Build') {
             steps {
-                sh 'idf.py all'
+                sh '/bin/bash -c "source /opt/esp/idf/export.sh &&  idf.py all"'
             }
         }
 
         stage ('Distribution') {
             steps {
-                sh 'echo python project/do_distribute.py'
+                sh '/bin/bash -c "export DATE=`date +%Y%m%d-%H%M` && zip SCP_Welcome-\\$DATE.zip build/scp_welcome.bin build/partition_table/partition?table.bin build/bootloader/bootloader.bin"'
             }
+        }
+    }
+ 
+    post {
+        success {
+            archiveArtifacts artifacts: '**/*.zip', fingerprint: true
         }
     }
 }
