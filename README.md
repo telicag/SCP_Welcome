@@ -4,9 +4,12 @@ This is an extended fork of the ESP-IDF "hello_world" example.
 
 Starts a FreeRTOS task to print a greeting message and blink 2 user LEDs.
 
-## Example folder contents
+
+## Folder contents
 
 The project **scp_welcome** contains one source file in C language [scp_welcome_main.c](main/scp_welcome_main.c). The file is located in folder [main](main).
+
+####This project is besed on the release/v4.4 branch of the ESP-IDF.
 
 ESP-IDF projects are built using CMake. The project build configuration is contained in `CMakeLists.txt` files that provide set of directives and instructions describing the project's source files and targets (executable, library, or both). 
 
@@ -33,7 +36,7 @@ For more information on structure and contents of ESP-IDF projects, please refer
 
 Please use the following feedback channels:
 
-* For technical queries, go to the [esp32.com](https://esp32.com/) forum
+* For technical queries concerning ESP32 and toolchain, go to the [esp32.com](https://esp32.com/) forum
 * For a feature request or bug report, create a [GitHub issue](https://github.com/espressif/esp-idf/issues)
 * For questions regarding Telic Sensor2Cloud Platform hardware contact [Telic support](mailto://support@telic.de)
 
