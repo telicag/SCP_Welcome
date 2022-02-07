@@ -15,26 +15,44 @@
 #include "esp_spi_flash.h"
 #include "esp_log.h"
 #include "driver/i2c.h"
+#include "memory.h"
+#include "time.h"
 
 /* I2C bus constants */
-#define I2C_MASTER_SDA_IO           21
-#define I2C_MASTER_SCL_IO           22
-#define I2C_MASTER_FREQ_HZ          100000
-#define I2C_MASTER_TX_BUF_DISABLE   0     
-#define I2C_MASTER_RX_BUF_DISABLE   0    
-#define I2C_MASTER_TIMEOUT_MS       10000 
+#define I2C_MASTER_SDA_IO               21
+#define I2C_MASTER_SCL_IO               22
+#define I2C_MASTER_FREQ_HZ              100000
+#define I2C_MASTER_TX_BUF_DISABLE       0
+#define I2C_MASTER_RX_BUF_DISABLE       0
+#define I2C_MASTER_TIMEOUT_MS           10000
 
-static i2c_port_t i2c_master_port   = I2C_NUM_0;
+static i2c_port_t i2c_master_port       = I2C_NUM_0;
 
 /* IOEXPANDER PCAL6416 constants */
-#define PCAL6416_IOEXPANDER_ADDR    0x20
-#define PCAL6416_REG_OUTPUT_PORT_0  0x02
-#define PCAL6416_REG_OUTPUT_PORT_1  0x03
-#define PCAL6416_REG_CONFIG_PORT_0  0x06
-#define PCAL6416_REG_CONFIG_PORT_1  0x07
+#define PCAL6416_IOEXPANDER_I2C_ADDR    0x20
+#define PCAL6416_REG_OUTPUT_PORT_0      0x02
+#define PCAL6416_REG_OUTPUT_PORT_1      0x03
+#define PCAL6416_REG_CONFIG_PORT_0      0x06
+#define PCAL6416_REG_CONFIG_PORT_1      0x07
 
-#define LED_1_MASK                  0x01
-#define LED_2_MASK                  0x02
+/* LED connectors */
+#define LED_1_MASK                      0x01
+#define LED_2_MASK                      0x02
+
+/* EEPROM constants */
+#define EEPROM_I2C_ADDR                 0x50
+#define EEPROM_MAX_READ_INDEX           0x1f
+struct EEPROMInfo
+{
+    uint8_t     eepromVersion;          // offset 1
+    uint32_t    productCodeMajor;       // offset 3, 3 bytes long
+    uint16_t    productCodeMinor;       // offset 6
+    uint32_t    timestamp;              // offset 9
+    uint16_t    assemblyCodeMajor;      // offset 14, 3 bytes long
+    uint16_t    assemblyCodeMinor;      // offset 17
+    char        imei[16];               // offset 24 8 bytes long
+};
+
 
 /* 
  * Initialising of the I2C bus the IOExpander is connected to
@@ -56,7 +74,7 @@ static void initI2C(void)
 }
 
 
-/* 
+/*
  * Initialising of the GPIOs of the IOExpander the LEDs are connected to
  */
 static void initLedGpios(void)
@@ -68,25 +86,25 @@ static void initLedGpios(void)
     // so its save to set not LED GPIOs  as input 
     buffer[0] = PCAL6416_REG_CONFIG_PORT_0;
     buffer[1] = 0xff ^ ( LED_1_MASK | LED_2_MASK);
-    ESP_ERROR_CHECK( i2c_master_write_to_device( i2c_master_port, PCAL6416_IOEXPANDER_ADDR, buffer, 2, I2C_MASTER_TIMEOUT_MS / portTICK_RATE_MS ));
+    ESP_ERROR_CHECK( i2c_master_write_to_device(i2c_master_port, PCAL6416_IOEXPANDER_I2C_ADDR, buffer, 2, I2C_MASTER_TIMEOUT_MS / portTICK_RATE_MS));
 }
 
 
 /* 
  * setting/clearing the LED GPIOs
  */
-static void setLED( uint8_t ledPort, bool enable)
+static void setLED( const uint8_t ledPort, const bool shine)
 {
     uint8_t buffer[4];
     uint8_t currentValue;
     const uint8_t curentRegister = PCAL6416_REG_OUTPUT_PORT_0;
 
     // read current output setting
-    ESP_ERROR_CHECK( i2c_master_write_read_device(i2c_master_port, PCAL6416_IOEXPANDER_ADDR, &curentRegister, sizeof(curentRegister), &currentValue, 1, I2C_MASTER_TIMEOUT_MS / portTICK_RATE_MS));
+    ESP_ERROR_CHECK( i2c_master_write_read_device(i2c_master_port, PCAL6416_IOEXPANDER_I2C_ADDR, &curentRegister, sizeof(curentRegister), &currentValue, 1, I2C_MASTER_TIMEOUT_MS / portTICK_RATE_MS));
  
     // set LED GPIOs
     buffer[0] = PCAL6416_REG_OUTPUT_PORT_0;
-    if( enable)
+    if( shine)
     {
         buffer[1] = currentValue | ledPort;
     }
@@ -94,13 +112,81 @@ static void setLED( uint8_t ledPort, bool enable)
     {
         buffer[1] = currentValue ^ ledPort;
     }
-    ESP_ERROR_CHECK( i2c_master_write_to_device( i2c_master_port, PCAL6416_IOEXPANDER_ADDR, buffer, 2, I2C_MASTER_TIMEOUT_MS / portTICK_RATE_MS ));
+    ESP_ERROR_CHECK( i2c_master_write_to_device(i2c_master_port, PCAL6416_IOEXPANDER_I2C_ADDR, buffer, 2, I2C_MASTER_TIMEOUT_MS / portTICK_RATE_MS));
+}
+
+
+/*
+ * Decode IMEI BCD coding to string
+ */
+static void decodeImei(const uint8_t *src, char *dst)
+{
+    int readIndex;
+    int writeIndex = 0;
+
+    for ( readIndex=0; readIndex<8; readIndex++)
+    {
+        if ( (src[readIndex] & 0xf0) < 0xa0)
+        {
+            dst[writeIndex++] = (src[readIndex] >> 8) + '0';
+        }
+        if ( (src[readIndex] & 0x0f) < 0x0a)
+        {
+            dst[writeIndex++] = src[readIndex] + '0';
+        }
+    }
+    dst[writeIndex] = 0;
+}
+
+
+/*
+ *  read hardware information from EEProm
+ */
+static void printHardwareInfo(void)
+{
+    uint8_t buffer[EEPROM_MAX_READ_INDEX];
+    const uint8_t currentRegister = 0;
+
+    memset( buffer, 0x55, sizeof(buffer));
+    // read values
+    ESP_ERROR_CHECK( i2c_master_write_read_device(i2c_master_port, EEPROM_I2C_ADDR, &currentRegister, sizeof(currentRegister), buffer, sizeof(buffer), I2C_MASTER_TIMEOUT_MS / portTICK_RATE_MS));
+
+    struct EEPROMInfo info = {
+        .eepromVersion     = (buffer[0] << 8) + buffer[1],
+        .productCodeMajor  = (buffer[3] << 16) + (buffer[4] << 8) + buffer[5],
+        .productCodeMinor  = (buffer[6] << 8) + buffer[7],
+        .timestamp         = *(uint32_t *)(&buffer[9]),
+        .assemblyCodeMajor = (buffer[14] << 16) + (buffer[15] << 8) + buffer[16],
+        .assemblyCodeMinor = (buffer[17] << 8) + buffer[18],
+    };
+    decodeImei( &buffer[24],info.imei);
+
+    printf( "\nEEProm information:\n");
+    if ( info.eepromVersion == 1)
+    {
+        printf("  Information version \t%d\n", info.eepromVersion);
+        printf("  Product code \t\t%d", info.productCodeMajor);
+        if ( info.productCodeMinor != 0xffff )
+            printf(".%d", info.productCodeMinor);
+        printf("\n");
+        struct tm * timeinfo;
+        timeinfo = localtime ((const time_t *)(&info.timestamp));
+        printf("  Production timestamp\t%d -> %s", info.timestamp, asctime(timeinfo));
+        printf("  Assembly code \t%d", info.assemblyCodeMajor);
+        if ( info.assemblyCodeMinor != 0xffff )
+            printf(".%d", info.assemblyCodeMinor);
+        printf("\n");
+        printf("  IMEI \t\t\t%s\n", info.imei);
+    }
+    else
+        printf( "\n*** not supported EEPROM protocol version %d\n",info.eepromVersion);
+    printf("\n");
 }
 
 
 void app_main(void)
 {
-    printf("Welcome to Telic Sensor2Cloud Platform\n");
+    printf("\nWelcome to Telic Sensor2Cloud Platform V1.0.4\n");
 
     /* Print chip information */
     esp_chip_info_t chip_info;
@@ -116,13 +202,15 @@ void app_main(void)
     printf("%dMB %s flash\n", spi_flash_get_chip_size() / (1024 * 1024),
             (chip_info.features & CHIP_FEATURE_EMB_FLASH) ? "embedded" : "external");
 
-    printf("Minimum free heap size: %d bytes\n", esp_get_minimum_free_heap_size());
+    printf("Minimum free heap size: %d bytes\n\n", esp_get_minimum_free_heap_size());
 
     printf("Init I2C\n");
     initI2C();
     printf("Init IOExpander\n");
-    initLedGpios(); 
-    
+    initLedGpios();
+
+    printHardwareInfo();
+
     for (int i = 15; i >= 0; i--) {
         printf("Restarting in %d seconds...\n", i);
         setLED( LED_1_MASK, i%2);
