@@ -16,6 +16,7 @@ pipeline {
             alwaysPull true
             image 'espressif/idf:release-v4.4'
             args "--entrypoint=\'\' -u0:0"
+            label "BUILDSERVER"
         }
     }
 
@@ -47,6 +48,7 @@ pipeline {
                         ],
                         userRemoteConfigs: scm.userRemoteConfigs
                     ])
+                sh 'git config --global --add safe.directory ${WORKSPACE}'
                 sh 'git submodule update --init --recursive'
             }
         }
