@@ -41,7 +41,7 @@ static i2c_port_t i2c_master_port       = I2C_NUM_0;
 
 /* EEPROM constants */
 #define EEPROM_I2C_ADDR                 0x50
-#define EEPROM_MAX_READ_INDEX           0x1f
+#define EEPROM_MAX_READ_INDEX           0x30
 struct EEPROMInfo
 {
     uint8_t     eepromVersion;          // offset 1
@@ -121,19 +121,19 @@ static void setLED( const uint8_t ledPort, const bool shine)
  */
 static void decodeImei(const uint8_t *src, char *dst)
 {
-    int readIndex;
-    int writeIndex = 0;
+    int8_t readIndex;
+    int8_t writeIndex = 0;
+    uint8_t bcd = 0;
 
     for ( readIndex=0; readIndex<8; readIndex++)
     {
-        if ( (src[readIndex] & 0xf0) < 0xa0)
-        {
-            dst[writeIndex++] = (src[readIndex] >> 8) + '0';
-        }
-        if ( (src[readIndex] & 0x0f) < 0x0a)
-        {
-            dst[writeIndex++] = src[readIndex] + '0';
-        }
+        bcd = (src[readIndex] & 0xf0) >> 4;
+        if ( bcd < 0x0a)
+            dst[writeIndex++] = bcd + '0';
+
+        bcd = (src[readIndex] & 0x0f);
+        if ( bcd < 0x0a)
+            dst[writeIndex++] = bcd + '0';
     }
     dst[writeIndex] = 0;
 }
@@ -159,6 +159,7 @@ static void printHardwareInfo(void)
         .assemblyCodeMajor = (buffer[14] << 16) + (buffer[15] << 8) + buffer[16],
         .assemblyCodeMinor = (buffer[17] << 8) + buffer[18],
     };
+    memset(info.imei,0,sizeof (info.imei));
     decodeImei( &buffer[24],info.imei);
 
     printf( "\nEEProm information:\n");
@@ -186,7 +187,7 @@ static void printHardwareInfo(void)
 
 void app_main(void)
 {
-    printf("\nWelcome to Telic Sensor2Cloud Platform V1.0.4\n");
+    printf("\nWelcome to Telic Sensor2Cloud Platform V1.0.6\n");
 
     /* Print chip information */
     esp_chip_info_t chip_info;
