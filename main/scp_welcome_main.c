@@ -16,7 +16,7 @@
 #include "esp_log.h"
 #include "driver/i2c.h"
 #include "memory.h"
-#include "time.h"
+#include "EepromInfo.h"
 
 /* I2C bus constants */
 #define I2C_MASTER_SDA_IO               21
@@ -26,7 +26,7 @@
 #define I2C_MASTER_RX_BUF_DISABLE       0
 #define I2C_MASTER_TIMEOUT_MS           10000
 
-static i2c_port_t i2c_master_port       = I2C_NUM_0;
+i2c_port_t i2c_master_port              = I2C_NUM_0;
 
 /* IOEXPANDER PCAL6416 constants */
 #define PCAL6416_IOEXPANDER_I2C_ADDR    0x20
@@ -39,22 +39,7 @@ static i2c_port_t i2c_master_port       = I2C_NUM_0;
 #define LED_1_MASK                      0x01
 #define LED_2_MASK                      0x02
 
-/* EEPROM constants */
-#define EEPROM_I2C_ADDR                 0x50
-#define EEPROM_MAX_READ_INDEX           0x30
-struct EEPROMInfo
-{
-    uint8_t     eepromVersion;          // offset 1
-    uint32_t    productCodeMajor;       // offset 3, 3 bytes long
-    uint16_t    productCodeMinor;       // offset 6
-    uint32_t    timestamp;              // offset 9
-    uint16_t    assemblyCodeMajor;      // offset 14, 3 bytes long
-    uint16_t    assemblyCodeMinor;      // offset 17
-    char        imei[16];               // offset 24 8 bytes long
-};
-
-
-/* 
+/*
  * Initialising of the I2C bus the IOExpander is connected to
  */
 static void initI2C(void)
@@ -116,78 +101,9 @@ static void setLED( const uint8_t ledPort, const bool shine)
 }
 
 
-/*
- * Decode IMEI BCD coding to string
- */
-static void decodeImei(const uint8_t *src, char *dst)
-{
-    int8_t readIndex;
-    int8_t writeIndex = 0;
-    uint8_t bcd = 0;
-
-    for ( readIndex=0; readIndex<8; readIndex++)
-    {
-        bcd = (src[readIndex] & 0xf0) >> 4;
-        if ( bcd < 0x0a)
-            dst[writeIndex++] = bcd + '0';
-
-        bcd = (src[readIndex] & 0x0f);
-        if ( bcd < 0x0a)
-            dst[writeIndex++] = bcd + '0';
-    }
-    dst[writeIndex] = 0;
-}
-
-
-/*
- *  read hardware information from EEProm
- */
-static void printHardwareInfo(void)
-{
-    uint8_t buffer[EEPROM_MAX_READ_INDEX];
-    const uint8_t currentRegister = 0;
-
-    memset( buffer, 0x55, sizeof(buffer));
-    // read values
-    ESP_ERROR_CHECK( i2c_master_write_read_device(i2c_master_port, EEPROM_I2C_ADDR, &currentRegister, sizeof(currentRegister), buffer, sizeof(buffer), I2C_MASTER_TIMEOUT_MS / portTICK_RATE_MS));
-
-    struct EEPROMInfo info = {
-        .eepromVersion     = (buffer[0] << 8) + buffer[1],
-        .productCodeMajor  = (buffer[3] << 16) + (buffer[4] << 8) + buffer[5],
-        .productCodeMinor  = (buffer[6] << 8) + buffer[7],
-        .timestamp         = *(uint32_t *)(&buffer[9]),
-        .assemblyCodeMajor = (buffer[14] << 16) + (buffer[15] << 8) + buffer[16],
-        .assemblyCodeMinor = (buffer[17] << 8) + buffer[18],
-    };
-    memset(info.imei,0,sizeof (info.imei));
-    decodeImei( &buffer[24],info.imei);
-
-    printf( "\nEEProm information:\n");
-    if ( info.eepromVersion == 1)
-    {
-        printf("  Information version \t%d\n", info.eepromVersion);
-        printf("  Product code \t\t%d", info.productCodeMajor);
-        if ( info.productCodeMinor != 0xffff )
-            printf(".%d", info.productCodeMinor);
-        printf("\n");
-        struct tm * timeinfo;
-        timeinfo = localtime ((const time_t *)(&info.timestamp));
-        printf("  Production timestamp\t%d -> %s", info.timestamp, asctime(timeinfo));
-        printf("  Assembly code \t%d", info.assemblyCodeMajor);
-        if ( info.assemblyCodeMinor != 0xffff )
-            printf(".%d", info.assemblyCodeMinor);
-        printf("\n");
-        printf("  IMEI \t\t\t%s\n", info.imei);
-    }
-    else
-        printf( "\n*** not supported EEPROM protocol version %d\n",info.eepromVersion);
-    printf("\n");
-}
-
-
 void app_main(void)
 {
-    printf("\nWelcome to Telic Sensor2Cloud Platform V1.0.6\n");
+    printf("\nWelcome to Telic Sensor2Cloud Platform V1.0.8\n");
 
     /* Print chip information */
     esp_chip_info_t chip_info;
@@ -210,7 +126,17 @@ void app_main(void)
     printf("Init IOExpander\n");
     initLedGpios();
 
-    printHardwareInfo();
+    // read and decode EEProm
+    uint8_t buffer[EEPROM_MAX_READ_INDEX];
+    const uint8_t currentRegister = 0;
+    memset( buffer, 0x55, sizeof(buffer));
+
+    // read values
+    ESP_ERROR_CHECK( i2c_master_write_read_device(i2c_master_port, EEPROM_I2C_ADDR, &currentRegister, sizeof(currentRegister), buffer, sizeof(buffer), I2C_MASTER_TIMEOUT_MS / portTICK_RATE_MS));
+    EEPROMInfo info;
+    getEepromInfo( buffer, sizeof(buffer), &info);
+    printEepromInfo( info);
+
 
     for (int i = 15; i >= 0; i--) {
         printf("Restarting in %d seconds...\n", i);
