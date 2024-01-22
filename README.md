@@ -7,7 +7,10 @@ Starts a FreeRTOS task to print some useful info and blink 2 user LEDs.
 
 ## Folder contents
 
-The project **scp_welcome** contains one source file in C language [scp_welcome_main.c](main/scp_welcome_main.c). The file is located in folder [main](main).
+The project **scp_welcome** contains one main source file in C language [scp_welcome_main.c](main/scp_welcome_main.c). The file is located in folder [main](main).
+
+Additionally, the processing of the EEprom is put into the file [Eeprominfo.c](main/Eeprominfo.c), accompanied by the correspnding header [Eeprominfo.h](main/Eeprominfo.h).
+
 
 ###This project is based on the release/v4.4 branch of the ESP-IDF.
 
@@ -20,6 +23,8 @@ Below is short explanation of remaining files in the project folder.
 ├── main
 │   ├── CMakeLists.txt
 │   └── scp_welcome_main.c
+│   └── Eeprominfo.c
+│   └── Eeprominfo.h
 └── README.md                  This is the file you are currently reading
 ```
 
